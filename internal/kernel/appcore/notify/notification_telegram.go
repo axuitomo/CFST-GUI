@@ -9,9 +9,12 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 	"unicode/utf16"
+
+	"github.com/axuitomo/CFST-GUI/internal/kernel/infra/httpclient"
 )
 
 const (
@@ -323,7 +326,43 @@ func sendTelegramMessageToChat(ctx context.Context, botToken string, chatID stri
 	return nil
 }
 
+func validateTelegramBotToken(botToken string) error {
+	token := strings.TrimSpace(botToken)
+	if token == "" {
+		return errors.New("Telegram Bot Token 不能为空")
+	}
+	if strings.Contains(token, "..") || strings.ContainsAny(token, "/\\?#@") {
+		return errors.New("Telegram Bot Token 格式无效")
+	}
+	for _, r := range token {
+		if r <= 0x20 || r == 0x7f {
+			return errors.New("Telegram Bot Token 不能包含空白或控制字符")
+		}
+	}
+	return nil
+}
+
+func buildTelegramSendMessageURL(apiBaseURL, botToken string) (string, error) {
+	if err := validateTelegramBotToken(botToken); err != nil {
+		return "", err
+	}
+	parsed, err := httpclient.ValidateEndpointURL(apiBaseURL, true)
+	if err != nil {
+		return "", fmt.Errorf("Telegram API 地址无效：%w", err)
+	}
+	if parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", errors.New("Telegram API 根地址不能包含查询参数或锚点")
+	}
+	endpoint := *parsed
+	endpoint.Path = strings.TrimRight(endpoint.Path, "/") + "/bot" + url.PathEscape(strings.TrimSpace(botToken)) + "/sendMessage"
+	return endpoint.String(), nil
+}
+
 func sendTelegramMessageChunk(ctx context.Context, botToken string, chatID string, text string, client *http.Client, apiBaseURL string) error {
+	endpointURL, err := buildTelegramSendMessageURL(apiBaseURL, botToken)
+	if err != nil {
+		return redactTelegramRequestError(err, botToken)
+	}
 	body, err := json.Marshal(map[string]any{
 		"chat_id":                  chatID,
 		"disable_web_page_preview": true,
@@ -332,7 +371,7 @@ func sendTelegramMessageChunk(ctx context.Context, botToken string, chatID strin
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiBaseURL+"/bot"+botToken+"/sendMessage", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpointURL, bytes.NewReader(body))
 	if err != nil {
 		return redactTelegramRequestError(err, botToken)
 	}

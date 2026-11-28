@@ -48,7 +48,14 @@ func answerServer(t *testing.T, respond func(query dnsmessage.Message) dnsmessag
 }
 
 func TestNewRejectsNonHTTPS(t *testing.T) {
-	for _, endpoint := range []string{"http://dns.example/dns-query", "dns.example/dns-query", "https:///dns-query"} {
+	for _, endpoint := range []string{
+		"http://dns.example/dns-query",
+		"dns.example/dns-query",
+		"https:///dns-query",
+		"https://user:pass@dns.example/dns-query",
+		"https://169.254.169.254/dns-query",
+		"https://metadata.google.internal/dns-query",
+	} {
 		if _, err := doh.New(endpoint); err == nil {
 			t.Fatalf("New(%q) error = nil, want rejection", endpoint)
 		}

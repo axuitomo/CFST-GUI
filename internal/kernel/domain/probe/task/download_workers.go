@@ -115,8 +115,10 @@ func (e *Engine) runDownloadRangeWorkers(ctx context.Context, client *http.Clien
 	workerCount := e.config.DownloadGetConcurrency
 	if workerCount <= 0 {
 		workerCount = defaultDownloadGetConcurrency
+	} else if workerCount > MaxDownloadGetConcurrency {
+		workerCount = MaxDownloadGetConcurrency
 	}
-	if probe.totalSize > 0 && probe.totalSize <= int64(math.MaxInt) && int64(workerCount) > probe.totalSize {
+	if probe.totalSize > 0 && probe.totalSize <= math.MaxInt32 && int64(workerCount) > probe.totalSize {
 		workerCount = int(probe.totalSize)
 	}
 	if workerCount <= 0 {

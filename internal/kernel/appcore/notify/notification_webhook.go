@@ -63,8 +63,9 @@ func NotificationHTTPClient(client *http.Client, useSystemProxy bool) *http.Clie
 		timeout = client.Timeout
 	}
 	options := httpclient.Options{
-		Protocol: httpclient.ProtocolTCP,
-		Timeout:  timeout,
+		BlockLinkLocal: true,
+		Protocol:       httpclient.ProtocolTCP,
+		Timeout:        timeout,
 	}
 	if useSystemProxy {
 		options.Proxy = httpclient.EnvFirstProxy
@@ -133,16 +134,16 @@ func sendWebhookPayload(ctx context.Context, cfg WebhookNotificationConfig, payl
 	}
 	failures := make([]string, 0)
 	for index, item := range targets {
-		parsed, err := url.Parse(item.endpoint)
-		if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") {
-			failures = append(failures, fmt.Sprintf("%s target %d: 无效的 HTTP(S) 地址", item.name, index+1))
+		parsed, err := httpclient.ValidateEndpointURL(item.endpoint, true)
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("%s target %d: %v", item.name, index+1, err))
 			continue
 		}
 		body, err := json.Marshal(item.payload)
 		if err != nil {
 			return err
 		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, item.endpoint, bytes.NewReader(body))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, parsed.String(), bytes.NewReader(body))
 		if err != nil {
 			failures = append(failures, fmt.Sprintf("%s target %d: 请求构造失败", item.name, index+1))
 			continue

@@ -222,3 +222,21 @@ func TestWebDAVClientDoesNotFollowSystemProxy(t *testing.T) {
 		t.Fatal("Proxy is set, want a direct WebDAV client")
 	}
 }
+
+func TestWebDAVRejectsDisallowedURLAndPathTraversal(t *testing.T) {
+	for _, serverURL := range []string{
+		"http://169.254.169.254/dav",
+		"https://user:pass@example.com/dav",
+		"https://metadata.google.internal/dav",
+	} {
+		if _, err := WebDAVTargetURL(WebDAVConfig{ServerURL: serverURL, RemotePath: "backup.zip"}); err == nil {
+			t.Fatalf("WebDAVTargetURL(%q) = nil, want error", serverURL)
+		}
+		if _, _, err := WebDAVRequest(context.Background(), WebDAVConfig{TimeoutSeconds: 1}, http.MethodHead, serverURL+"/backup.zip", nil, "CFST-GUI/test"); err == nil {
+			t.Fatalf("WebDAVRequest(%q) = nil, want error", serverURL)
+		}
+	}
+	if _, err := WebDAVTargetURL(WebDAVConfig{ServerURL: "https://example.com/dav", RemotePath: "../escape.zip"}); err == nil {
+		t.Fatal("WebDAVTargetURL accepted .. traversal path")
+	}
+}

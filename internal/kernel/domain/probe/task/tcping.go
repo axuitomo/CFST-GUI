@@ -19,7 +19,9 @@ import (
 const (
 	defaultTCPConnectTimeout = time.Second * 1
 	MinPingTimes             = 2
+	MaxPingTimes             = 100
 	defaultRoutines          = 200
+	MaxRoutines              = 1000
 	defaultPort              = 443
 	defaultPingTimes         = 4
 	// TLS 握手要多个 RTT，不能沿用阶段 1 的 TCP 建连预算。
@@ -72,7 +74,7 @@ func (e *Engine) NewPing() (*Ping, error) {
 		wg:      &sync.WaitGroup{},
 		ips:     ips,
 		csv:     make(utils.PingDelaySet, 0),
-		control: make(chan bool, e.config.Routines),
+		control: makeBoundedChan[bool](e.config.Routines, defaultRoutines, MaxRoutines),
 		bar:     utils.NewBar(len(ips), "可用:", ""),
 		total:   len(ips),
 	}, nil
@@ -180,8 +182,21 @@ func (p *Ping) checkConnection(ip *net.IPAddr) (sent, recv int, totalDelay time.
 	// 的墙钟成本放大成 4 倍，而阶段 1 要过完整个候选池。代价是同时在飞连接数从 Routines
 	// 变成 Routines×PingTimes；暂停/终止检查因此只在一批采样的边界上生效（最多等一个超时）。
 	times := engine.config.PingTimes
-	oks := make([]bool, times)
-	delays := make([]time.Duration, times)
+	var oks []bool
+	var delays []time.Duration
+	switch {
+	case times < MinPingTimes:
+		times = MinPingTimes
+		oks = make([]bool, MinPingTimes)
+		delays = make([]time.Duration, MinPingTimes)
+	case times > MaxPingTimes:
+		times = MaxPingTimes
+		oks = make([]bool, MaxPingTimes)
+		delays = make([]time.Duration, MaxPingTimes)
+	default:
+		oks = make([]bool, times)
+		delays = make([]time.Duration, times)
+	}
 	var wg sync.WaitGroup
 	for i := 0; i < times; i++ {
 		wg.Add(1)

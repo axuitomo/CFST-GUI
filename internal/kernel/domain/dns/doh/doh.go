@@ -14,7 +14,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -45,12 +44,9 @@ type Resolver struct {
 // https URL; plain http is rejected so a misconfiguration cannot downgrade to
 // cleartext DNS.
 func New(endpoint string) (*Resolver, error) {
-	parsed, err := url.Parse(endpoint)
+	parsed, err := httpclient.ValidateEndpointURL(endpoint, false)
 	if err != nil {
 		return nil, fmt.Errorf("DoH 地址无效：%w", err)
-	}
-	if parsed.Scheme != "https" || parsed.Host == "" {
-		return nil, errors.New("DoH 地址必须是 https:// 开头的完整 URL")
 	}
 	return &Resolver{Endpoint: parsed.String()}, nil
 }
@@ -176,7 +172,11 @@ func (r *Resolver) exchange(ctx context.Context, host string, qtype dnsmessage.T
 
 // exchangePayload posts one packed query and returns the raw response body.
 func (r *Resolver) exchangePayload(ctx context.Context, payload []byte) ([]byte, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, r.Endpoint, bytes.NewReader(payload))
+	parsed, err := httpclient.ValidateEndpointURL(r.Endpoint, true)
+	if err != nil {
+		return nil, fmt.Errorf("DoH 地址无效：%w", err)
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, parsed.String(), bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
 	}
@@ -309,9 +309,10 @@ func sharedClient() *http.Client {
 		// 只跟随显式配置的 HTTPS_PROXY：系统代理在需要 DoH 的网络里往往正是
 		// 失败或劫持的那一跳，跟随它会让 DoH 失去意义。
 		client = httpclient.NewClient(httpclient.Options{
-			Protocol: httpclient.ProtocolTCP,
-			Timeout:  DefaultTimeout,
-			Proxy:    httpclient.EnvProxy,
+			Protocol:       httpclient.ProtocolTCP,
+			Timeout:        DefaultTimeout,
+			Proxy:          httpclient.EnvProxy,
+			BlockLinkLocal: true,
 		})
 	})
 	return client

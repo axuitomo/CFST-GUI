@@ -136,7 +136,7 @@ func (e *Engine) TestDownloadSpeed(ipSet utils.PingDelaySet) (speedSet utils.Dow
 	bar := utils.NewBar(testNum, bar_b, "")
 	results := make([]utils.CloudflareIPData, testNum)
 	qualified := make([]bool, testNum)
-	control := make(chan struct{}, config.DownloadRoutines)
+	control := makeBoundedChan[struct{}](config.DownloadRoutines, defaultDownloadRoutines, MaxDownloadRoutines)
 	var wg sync.WaitGroup
 	var processedCount atomic.Int32
 	var qualifiedCount atomic.Int32

@@ -83,8 +83,9 @@ type Options struct {
 	DisableProxy bool
 	// Proxy sets the proxy policy for TCP transports. When set it wins over
 	// DisableProxy, so a caller can scope proxying to the env var it names.
-	Proxy         func(*http.Request) (*url.URL, error)
-	CheckRedirect func(req *http.Request, via []*http.Request) error
+	Proxy          func(*http.Request) (*url.URL, error)
+	CheckRedirect  func(req *http.Request, via []*http.Request) error
+	BlockLinkLocal bool
 
 	// tlsConfigOverride replaces the shared profile config for one transport.
 	// ECH uses it to attach a host-specific ECHConfigList.
@@ -557,7 +558,13 @@ func dialContextForOptions(opts Options) func(ctx context.Context, network, addr
 			Timeout:   durationOrDefault(opts.TLSHandshakeTimeout, 10*time.Second),
 			KeepAlive: 30 * time.Second,
 		}
+		if opts.BlockLinkLocal {
+			dialer.Control = blockDisallowedEndpointControl
+		}
 		dialContext = dialer.DialContext
+	}
+	if opts.BlockLinkLocal {
+		dialContext = wrapBlockLinkLocalDialContext(dialContext)
 	}
 	if opts.Resolver != nil {
 		dialContext = resolverDialContext(dialContext, opts.Resolver)

@@ -48,7 +48,7 @@ function extractScriptText(filePath, content) {
     return content;
   }
   const chunks = [];
-  for (const match of content.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi)) {
+  for (const match of content.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\b[^>]*>/gi)) {
     chunks.push(match[1] || "");
   }
   return chunks.join("\n");

@@ -100,6 +100,19 @@ func TestNormalizeConfigRejectsSinglePingTime(t *testing.T) {
 	}
 }
 
+func TestNormalizeConfigCapsRoutinesAndPingTimes(t *testing.T) {
+	config := DefaultConfig()
+	config.Routines = MaxRoutines + 500
+	config.PingTimes = MaxPingTimes + 50
+	config = normalizeConfig(config)
+	if config.Routines != MaxRoutines {
+		t.Fatalf("Routines = %d, want %d", config.Routines, MaxRoutines)
+	}
+	if config.PingTimes != MaxPingTimes {
+		t.Fatalf("PingTimes = %d, want %d", config.PingTimes, MaxPingTimes)
+	}
+}
+
 func TestResetStageCooldownCountersClearsPartialFailures(t *testing.T) {
 	engine := NewEngine(Config{
 		CooldownFailures: 2,

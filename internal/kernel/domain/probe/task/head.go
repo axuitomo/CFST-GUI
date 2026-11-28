@@ -114,7 +114,7 @@ func (e *Engine) TestTraceAvailability(ipSet utils.PingDelaySet) (traceSet utils
 	passed := make([]bool, len(candidates))
 	fallbackResults := make([]utils.CloudflareIPData, len(candidates))
 	fallbackPassed := make([]bool, len(candidates))
-	control := make(chan struct{}, e.config.HeadRoutines)
+	control := makeBoundedChan[struct{}](e.config.HeadRoutines, defaultHeadRoutines, MaxTraceRoutines)
 	var wg sync.WaitGroup
 	var processedCount atomic.Int32
 	var passedCount atomic.Int32

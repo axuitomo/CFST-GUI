@@ -311,6 +311,8 @@ func normalizeConfig(config Config) Config {
 	defaults := DefaultConfig()
 	if config.Routines <= 0 {
 		config.Routines = defaults.Routines
+	} else if config.Routines > MaxRoutines {
+		config.Routines = MaxRoutines
 	}
 	if config.TCPPort <= 0 || config.TCPPort >= 65535 {
 		config.TCPPort = defaults.TCPPort
@@ -319,6 +321,8 @@ func normalizeConfig(config Config) Config {
 		config.PingTimes = defaults.PingTimes
 	} else if config.PingTimes < MinPingTimes {
 		config.PingTimes = MinPingTimes
+	} else if config.PingTimes > MaxPingTimes {
+		config.PingTimes = MaxPingTimes
 	}
 	if config.TCPConnectTimeout <= 0 {
 		config.TCPConnectTimeout = defaults.TCPConnectTimeout
@@ -374,4 +378,14 @@ func normalizeConfig(config Config) Config {
 		config.UserAgent = defaults.UserAgent
 	}
 	return config
+}
+
+func makeBoundedChan[T any](size, fallback, ceiling int) chan T {
+	if size <= 0 {
+		return make(chan T, fallback)
+	}
+	if size > ceiling {
+		return make(chan T, ceiling)
+	}
+	return make(chan T, size)
 }

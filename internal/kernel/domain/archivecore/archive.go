@@ -168,12 +168,9 @@ func WebDAVTargetURL(cfg WebDAVConfig) (string, error) {
 	if err := validateWebDAVRemotePath(cfg.RemotePath); err != nil {
 		return "", err
 	}
-	base, err := url.Parse(cfg.ServerURL)
+	base, err := httpclient.ValidateEndpointURL(cfg.ServerURL, true)
 	if err != nil {
-		return "", err
-	}
-	if base.Scheme != "http" && base.Scheme != "https" {
-		return "", fmt.Errorf("WebDAV 地址必须以 http:// 或 https:// 开头")
+		return "", fmt.Errorf("WebDAV 地址无效：%w", err)
 	}
 	if !strings.HasSuffix(base.Path, "/") {
 		base.Path += "/"
@@ -190,9 +187,10 @@ func WebDAVTargetURL(cfg WebDAVConfig) (string, error) {
 // HTTP_PROXY 等环境代理变量。
 func webDAVHTTPClient(timeout time.Duration) *http.Client {
 	return httpclient.NewClient(httpclient.Options{
-		DisableProxy: true,
-		Protocol:     httpclient.ProtocolTCP,
-		Timeout:      timeout,
+		BlockLinkLocal: true,
+		DisableProxy:   true,
+		Protocol:       httpclient.ProtocolTCP,
+		Timeout:        timeout,
 	})
 }
 
@@ -203,13 +201,17 @@ func WebDAVRequest(ctx context.Context, cfg WebDAVConfig, method, targetURL stri
 	if strings.TrimSpace(userAgent) == "" {
 		userAgent = "CFST-GUI"
 	}
+	parsedURL, err := httpclient.ValidateEndpointURL(targetURL, true)
+	if err != nil {
+		return 0, nil, fmt.Errorf("WebDAV 地址无效：%w", err)
+	}
 	timeout := time.Duration(cfg.TimeoutSeconds) * time.Second
 	client := webDAVHTTPClient(timeout)
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewReader(body)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, targetURL, reader)
+	req, err := http.NewRequestWithContext(ctx, method, parsedURL.String(), reader)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -255,12 +257,22 @@ func SensitiveArchiveWarnings() []string {
 
 func validateWebDAVRemotePath(remotePath string) error {
 	remotePath = strings.TrimSpace(remotePath)
+	for _, r := range remotePath {
+		if r < 0x20 || r == 0x7f {
+			return fmt.Errorf("WebDAV 远端路径不能包含控制字符")
+		}
+	}
 	parsed, err := url.Parse(remotePath)
 	if err != nil {
 		return fmt.Errorf("WebDAV 远端路径无效：%w", err)
 	}
 	if parsed.Scheme != "" || parsed.Host != "" {
 		return fmt.Errorf("WebDAV 远端路径必须是相对路径，不能填写完整 URL")
+	}
+	for _, segment := range strings.Split(strings.ReplaceAll(remotePath, "\\", "/"), "/") {
+		if segment == ".." {
+			return fmt.Errorf("WebDAV 远端路径不能包含上级目录跳转")
+		}
 	}
 	return nil
 }

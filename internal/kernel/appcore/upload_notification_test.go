@@ -838,3 +838,36 @@ func TestNotificationTimeAndDurationLabels(t *testing.T) {
 		}
 	}
 }
+
+func TestTelegramAndWebhookRejectUnsafeTargets(t *testing.T) {
+	called := false
+	client := &http.Client{Transport: telegramRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		called = true
+		return nil, errors.New("unexpected network call")
+	})}
+	if err := notify.SendTelegramMessage(context.Background(), notify.TelegramNotificationConfig{
+		Enabled:  true,
+		BotToken: "123456:abc/../../evil",
+		ChatID:   "chat-1",
+	}, "hello", client, notify.TelegramAPIBaseURL); err == nil || called {
+		t.Fatalf("SendTelegramMessage invalid token err=%v called=%v", err, called)
+	}
+	if err := notify.SendTelegramMessage(context.Background(), notify.TelegramNotificationConfig{
+		Enabled:  true,
+		BotToken: "123456:valid_token",
+		ChatID:   "chat-1",
+	}, "hello", client, "http://169.254.169.254"); err == nil || called {
+		t.Fatalf("SendTelegramMessage metadata URL err=%v called=%v", err, called)
+	}
+	err := notify.SendWebhookUploadNotification(context.Background(), map[string]any{
+		"notifications": map[string]any{
+			"webhook": map[string]any{
+				"enabled": true,
+				"urls":    []string{"http://169.254.169.254/latest/meta-data/", "https://user:pass@example.com/hook"},
+			},
+		},
+	}, notify.BuildUploadNotification(notify.UploadNotificationInput{Source: notify.UploadNotificationSourceManualPush}), client)
+	if err == nil || called {
+		t.Fatalf("SendWebhookUploadNotification unsafe URLs err=%v called=%v", err, called)
+	}
+}
